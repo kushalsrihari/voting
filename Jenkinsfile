@@ -1,72 +1,51 @@
-pipeline {
-  agent {
-    label 'upgrad'
-  }
-  stages {
-    stage('Git Checkout') {
-      steps {
-        checkout scm
-      }
+pipeline{
+    //agent any
+    agent {label 'slave-2'}
+    options{
+        buildDiscarder(logRotator(daysToKeepStr: '15'))
+        disableConcurrentBuilds()
+        timeout(time: 5, unit: 'MINUTES')
+        retry (3)
     }
-
-    stage('Build Docker Image') {
-      parallel {
-        stage('Build Docker Image') {
-          steps {
-            sh 'cd vote && sudo docker build . -t 635145294553.dkr.ecr.us-east-1.amazonaws.com/vote:${BUILD_NUMBER}'
-            sh 'sudo docker push 635145294553.dkr.ecr.us-east-1.amazonaws.com/vote:${BUILD_NUMBER}'
-          }
+    parameters{
+        string(name: 'BRANCH', defaultValue: 'master')
+        booleanParam(name: 'Critical', defaultValue: false)
+        choice(name: 'Environment', choices: ['Dev', 'Qa', 'Uat', 'Prod'])
+    }
+    environment{
+        ECS_CLUSTER = "vote-app"
+        ENVIRONMENT = "global"
+    }
+    stages{
+       stage('Git Checkout'){
+        steps{
+            checkout scm
         }
-
-        stage('Unit Testing') {
-          steps {
-            sh 'echo Run the Test Cases'
-          }
+       } 
+       stage('Build and Push'){
+        steps{
+            sh "cd vote"
+            sh "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 017706783036.dkr.ecr.us-east-1.amazonaws.com"
+            sh "docker build -t 017706783036.dkr.ecr.us-east-1.amazonaws.com/integration:v${BUILD_NUMBER} ."
+            sh "docker push 017706783036.dkr.ecr.us-east-1.amazonaws.com/integration:v${BUILD_NUMBER}"
         }
-
-      }
-    }
-
-    stage('Deploy in ECS') {
-      steps {
-        script {
-          sh'''
-ECR_IMAGE="635145294553.dkr.ecr.us-east-1.amazonaws.com/vote:${BUILD_NUMBER}"
-TASK_DEFINITION=$(aws ecs describe-task-definition --task-definition "$TASK_FAMILY" --region "$AWS_DEFAULT_REGION")
-NEW_TASK_DEFINTIION=$(echo $TASK_DEFINITION | jq --arg IMAGE "$ECR_IMAGE" '.taskDefinition | .containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn) | del(.revision) | del(.status) | del(.requiresAttributes) | del(.compatibilities) | del(.registeredAt) | del(.registeredBy)')
-NEW_TASK_INFO=$(aws ecs register-task-definition --region "$AWS_DEFAULT_REGION" --cli-input-json "$NEW_TASK_DEFINTIION")
-NEW_REVISION=$(echo $NEW_TASK_INFO | jq '.taskDefinition.revision')
-aws ecs update-service --cluster ${ECS_CLUSTER} \
---service ${SERVICE_NAME} \
---task-definition ${TASK_FAMILY}:${NEW_REVISION}'''
+       }
+       stage('Deploy Stage'){
+        steps{
+            sh '''
+            ECR_IMAGE="017706783036.dkr.ecr.us-east-1.amazonaws.com/integration:v${BUILD_NUMBER}"
+            TASK_DEFINITION=$(aws ecs describe-task-definition --task-definition vote --region us-east-1)
+            NEW_TASK_DEFINTIION=$(echo $TASK_DEFINITION | jq --arg IMAGE "$ECR_IMAGE" '.taskDefinition | .containerDefinitions[0].image = $IMAGE | del(.taskDefinitionArn) | del(.revision) | del(.status) | del(.requiresAttributes) | del(.compatibilities) | del(.registeredAt) | del(.registeredBy)')
+            NEW_TASK_INFO=$(aws ecs register-task-definition --region us-east-1 --cli-input-json "$NEW_TASK_DEFINTIION")
+            NEW_REVISION=$(echo $NEW_TASK_INFO | jq '.taskDefinition.revision')
+            aws ecs update-service --region us-east-1 --cluster vote-app --service vote  --task-definition vote:${NEW_REVISION}'''
         }
-
-      }
+       } 
+    }
+    post{
+        always{
+            sh "echo running final steps"
+        }
     }
 
-    stage('Adding New Stage') {
-      steps {
-        sh 'echo adding a new stage'
-      }
-    }
-
-  }
-  environment {
-    AWS_DEFAULT_REGION = 'us-east-1'
-    SERVICE_NAME = 'vote'
-    TASK_FAMILY = 'vote-fargate-v1'
-    ECS_CLUSTER = 'vote-application'
-  }
-  post {
-    always {
-      deleteDir()
-      sh 'sudo docker rmi 635145294553.dkr.ecr.us-east-1.amazonaws.com/vote:${BUILD_NUMBER}'
-    }
-
-  }
-  options {
-    buildDiscarder(logRotator(numToKeepStr: '10'))
-    disableConcurrentBuilds()
-    timeout(time: 1, unit: 'HOURS')
-  }
 }
