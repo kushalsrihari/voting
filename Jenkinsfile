@@ -24,9 +24,8 @@ pipeline{
        } 
        stage('Build and Push'){
         steps{
-            sh "cd vote"
             sh "aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 017706783036.dkr.ecr.us-east-1.amazonaws.com"
-            sh "docker build -t 017706783036.dkr.ecr.us-east-1.amazonaws.com/integration:v${BUILD_NUMBER} ."
+            sh "cd vote && docker build -t 017706783036.dkr.ecr.us-east-1.amazonaws.com/integration:v${BUILD_NUMBER} ."
             sh "docker push 017706783036.dkr.ecr.us-east-1.amazonaws.com/integration:v${BUILD_NUMBER}"
         }
        }
