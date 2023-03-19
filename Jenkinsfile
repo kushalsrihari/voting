@@ -19,7 +19,8 @@ pipeline{
    stages{
     stage('Build and Push'){
         steps{
-            sh "echo Hello"
+            sh "cd vote"
+            sh "docker build -t 584716546011.dkr.ecr.us-east-1.amazonaws.com/demo-c41:v${BUILD_NUMBER} ."
         }
     }
     stage('Deploy Stage'){
